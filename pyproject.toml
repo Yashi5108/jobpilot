@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobpilot"
+version = "0.1.0"
+description = "JobPilot - AI Job Search & Application Assistant"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+  { name = "JobPilot Contributors" }
+]
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.0",
+  "streamlit>=1.49.0",
+  "sqlalchemy>=2.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+  "black>=25.1.0",
+  "alembic>=1.16.0"
+]
+
+[tool.setuptools]
+packages = [
+  "backend",
+  "backend.api",
+  "backend.core",
+  "backend.database",
+  "backend.schemas",
+  "backend.services",
+  "backend.ai",
+  "backend.connectors",
+  "backend.automation",
+  "backend.utils",
+  "frontend",
+  "tests"
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
