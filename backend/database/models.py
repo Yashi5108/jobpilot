@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy import (
     Enum as SQLEnum,
@@ -198,6 +199,14 @@ class Job(Base):
 
 class JobMatch(Base):
     __tablename__ = "job_matches"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "resume_id",
+            name="uq_job_matches_job_id_resume_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[int] = mapped_column(
