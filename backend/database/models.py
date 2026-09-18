@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     String,
 )
 from sqlalchemy import (
@@ -102,6 +103,19 @@ class Resume(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parse_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    normalized_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    analysis_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="NOT_ANALYZED"
+    )
+    analysis_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -115,6 +129,7 @@ class Resume(Base):
 
     profile: Mapped[UserProfile] = relationship(back_populates="resumes")
     applications: Mapped[list[Application]] = relationship(back_populates="resume")
+    job_matches: Mapped[list[JobMatch]] = relationship(back_populates="resume")
 
 
 class JobSource(Base):
@@ -155,6 +170,13 @@ class Job(Base):
     discovered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    analysis_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="NOT_ANALYZED"
+    )
+    analysis_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -184,6 +206,9 @@ class JobMatch(Base):
     profile_id: Mapped[int] = mapped_column(
         ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False
     )
+    resume_id: Mapped[int | None] = mapped_column(
+        ForeignKey("resumes.id", ondelete="CASCADE"), nullable=True
+    )
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     matching_skills: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     missing_skills: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -191,12 +216,20 @@ class JobMatch(Base):
     location_match: Mapped[bool | None] = mapped_column(nullable=True)
     preference_match: Mapped[bool | None] = mapped_column(nullable=True)
     explanation: Mapped[str | None] = mapped_column(String, nullable=True)
+    match_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     job: Mapped[Job] = relationship(back_populates="job_matches")
     profile: Mapped[UserProfile] = relationship(back_populates="job_matches")
+    resume: Mapped[Resume | None] = relationship(back_populates="job_matches")
 
 
 class Application(Base):
@@ -223,7 +256,11 @@ class Application(Base):
         default=ApplicationStatus.DISCOVERED,
     )
     cover_letter: Mapped[str | None] = mapped_column(String, nullable=True)
+    preparation_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     user_approved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     submitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

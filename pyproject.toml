@@ -18,7 +18,11 @@ dependencies = [
   "pydantic>=2.11.0",
   "pydantic-settings>=2.10.0",
   "streamlit>=1.49.0",
-  "sqlalchemy>=2.0.0"
+  "sqlalchemy>=2.0.0",
+  "playwright>=1.55.0",
+  "pypdf>=6.0.0",
+  "python-docx>=1.2.0",
+  "python-multipart>=0.0.20"
 ]
 
 [project.optional-dependencies]
@@ -33,15 +37,19 @@ dev = [
 packages = [
   "backend",
   "backend.api",
+  "backend.api.routes",
   "backend.core",
   "backend.database",
   "backend.schemas",
   "backend.services",
   "backend.ai",
+  "backend.browser",
   "backend.connectors",
   "backend.automation",
   "backend.utils",
   "frontend",
+  "frontend.components",
+  "frontend.pages",
   "tests"
 ]
 
@@ -55,3 +63,4 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
+ignore = ["B008"]

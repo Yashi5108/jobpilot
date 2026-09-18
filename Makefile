@@ -4,19 +4,19 @@ install:
 	pip install -e ".[dev]"
 
 lint:
-	ruff check .
+	.venv/bin/ruff check .
 
 format:
-	black .
+	.venv/bin/black .
 
 format-check:
-	black --check .
+	.venv/bin/black --check .
 
 test:
-	pytest
+	.venv/bin/pytest -q
 
 run-backend:
-	uvicorn backend.main:app --reload
+	.venv/bin/uvicorn backend.main:app --reload --app-dir $(CURDIR)
 
 run-frontend:
-	streamlit run frontend/app.py
+	.venv/bin/streamlit run $(CURDIR)/frontend/app.py

@@ -9,36 +9,41 @@ make format-check
 make test
 ```
 
-## Run Services
-
-Backend:
+## Direct Commands
 
 ```bash
-make run-backend
+.venv/bin/ruff check .
+.venv/bin/black --check .
+.venv/bin/pytest -q
 ```
 
-Frontend:
+## Migration Workflow
+
+- Never edit old migrations.
+- Add a new migration for each schema change.
+- Validate against a clean database:
 
 ```bash
-make run-frontend
+.venv/bin/alembic upgrade head
 ```
 
-## Code Quality
+## Service Design Rules
 
-- Ruff is used for linting.
-- Black is used for formatting.
-- Pytest is used for tests.
+- Keep business logic in services.
+- Keep route handlers thin.
+- Keep matching deterministic and pure.
+- Validate AI outputs before persistence.
 
-Run before opening pull requests:
+## Safety Rules
 
-```bash
-ruff check .
-black --check .
-pytest
-```
+- No scraping/credential harvesting/captcha bypass.
+- No auto-submit behavior.
+- Human approval is mandatory before `APPLIED`.
+- Avoid sensitive logging (resume text, secrets, auth state).
 
-## Notes
+## Testing Rules
 
-- Keep changes small and reviewable.
-- Avoid committing secrets or personal data.
-- Add tests alongside new backend behavior.
+- Mock Ollama in unit/integration tests.
+- Mock or dry-run browser-assistant behavior.
+- Use temp SQLite databases in tests.
+- Preserve and extend existing tests.

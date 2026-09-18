@@ -1,35 +1,59 @@
-# JobPilot Architecture (Planned)
+# JobPilot Architecture
 
-## Status
+## Layers
 
-This document describes the target architecture. Most components below are planned and not yet implemented.
+- API routes: request/response boundary, validation, HTTP errors
+- Services: orchestration, lifecycle, business rules
+- AI/browser/connectors: integration boundaries
+- Database models: persistence
+- Schemas: typed contracts
 
-## High-Level Overview
+Core direction:
 
-- Frontend (`frontend/app.py`): Streamlit-based user interface shell.
-- Backend (`backend/main.py`): FastAPI service exposing API endpoints.
-- Core (`backend/core/`): Shared configuration and logging.
-- Data (`data/`): Local working files and exports, intentionally excluded from version control except placeholders.
+- routes -> services -> database
+- services -> AI / browser / connectors
 
-## Planned Components
+## Implemented Modules
 
-- API layer (`backend/api/`): HTTP routes grouped by domain.
-- Services (`backend/services/`): Business logic and orchestration.
-- Schemas (`backend/schemas/`): Pydantic request/response models.
-- Database layer (`backend/database/`): SQLAlchemy engine, sessions, models, migrations.
-- AI layer (`backend/ai/`): Planned model integrations and prompting workflows.
-- Connectors (`backend/connectors/`): Planned external job-platform connectors.
-- Automation (`backend/automation/`): Planned browser/task automation workflows.
+- `backend/connectors/`: safe manual and structured import connectors
+- `backend/ai/`: resume/job analysis and application drafting prompts
+- `backend/services/matching/`: deterministic matching engine
+- `backend/services/application_preparation_service.py`: preparation orchestration
+- `backend/browser/`: conservative field mapping and Playwright assistant
+- `backend/services/application_service.py`: lifecycle transitions and event logging
+- `backend/services/analytics_service.py`: local read-only analytics
 
-## Runtime Flow (Planned)
+## Functional Flow
 
-1. Frontend calls backend APIs.
-2. Backend routes validate payloads with schemas.
-3. Services coordinate database operations and external integrations.
-4. Responses are returned to frontend for display.
+1. Resume -> parser -> ResumeAnalysis
+2. Job source connector -> normalized job -> dedupe -> Job
+3. Job -> JobAnalysis
+4. ResumeAnalysis + JobAnalysis -> deterministic matching -> JobMatch
+5. Match + resume + job -> application preparation drafts
+6. `READY_FOR_REVIEW` payload for human approval
+7. Browser assistant maps/fills known fields
+8. Human submits externally
+9. Explicit confirmation sets `APPLIED`
+10. Application tracker + analytics consume stored local data
 
-## Security and Data Safety Principles
+## Human-Approval Guard
 
-- No secrets committed to version control.
-- Sensitive user data remains local unless explicitly integrated in future tasks.
-- Logging should avoid personal or secret data.
+`APPLIED` is protected:
+
+- status patch cannot directly set `APPLIED`
+- explicit user approval endpoint is required
+- explicit submission-confirmation endpoint is required
+- browser assistant never triggers `APPLIED`
+
+## Browser Assistant Safety
+
+- Never bypasses CAPTCHA/authentication/MFA.
+- Unknown required fields are returned as `unknown_fields`.
+- File upload/custom widgets remain manual.
+- Final submission is always manual.
+
+## Privacy
+
+- Local-first storage and AI by default.
+- No external analytics export.
+- No automated scraping or credential collection.

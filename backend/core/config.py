@@ -14,6 +14,23 @@ class Settings(BaseSettings):
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
+    ollama_timeout_seconds: int = Field(
+        default=60,
+        alias="OLLAMA_TIMEOUT_SECONDS",
+    )
+    resume_storage_dir: str = Field(default="data/resumes", alias="RESUME_STORAGE_DIR")
+    resume_upload_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        alias="RESUME_UPLOAD_MAX_BYTES",
+    )
+    browser_assistant_mode: str = Field(
+        default="dry_run",
+        alias="BROWSER_ASSISTANT_MODE",
+    )
+    browser_headless: bool = Field(
+        default=True,
+        alias="BROWSER_HEADLESS",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

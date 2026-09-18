@@ -1,1 +1,5 @@
 """API package for JobPilot backend."""
+
+from backend.api.router import api_router
+
+__all__ = ["api_router"]
