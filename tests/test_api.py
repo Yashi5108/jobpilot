@@ -585,6 +585,124 @@ def test_job_structured_import_endpoints(db_session: Session) -> None:
     assert csv_payload["imported_count"] == 1
 
 
+def test_job_discovery_endpoint(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, profile_payload, _ = _run(
+        _asgi_request("POST", "/api/v1/profile", {"name": "Discovery User"})
+    )
+
+    _, resume_payload, _ = _run(
+        _asgi_request(
+            "POST",
+            "/api/v1/resumes",
+            {
+                "profile_id": profile_payload["id"],
+                "name": "Resume",
+                "file_path": "data/resumes/r.pdf",
+            },
+        )
+    )
+
+    resume = db_session.get(Resume, resume_payload["id"])
+    assert resume is not None
+    resume.analysis_status = "COMPLETED"
+    resume.analysis_result = CandidateProfile.model_validate(
+        {
+            "headline": "Backend Engineer",
+            "skills": [{"name": "Python"}],
+            "experience": [
+                {
+                    "title": "Backend Engineer",
+                    "start_date": "2019-01",
+                    "is_current": True,
+                }
+            ],
+            "education": [],
+            "projects": [],
+            "certifications": [],
+            "achievements": [],
+            "languages": [],
+        }
+    ).model_dump()
+    db_session.add(resume)
+    db_session.commit()
+
+    class _Connector:
+        source_name = "remotive"
+        source_type = "public_api"
+
+        def search(self, criteria: object) -> list[object]:
+            from backend.services.job_discovery.models import DiscoveredJob
+
+            return [
+                DiscoveredJob(
+                    title="Backend Engineer",
+                    company="Acme",
+                    location="Remote",
+                    description="Need Python",
+                    job_url="https://example.com/jobs/backend-engineer",
+                    source_name="remotive",
+                    source_type="public_api",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "backend.services.job_discovery.service._build_connectors",
+        lambda payload: [_Connector()],
+    )
+
+    def _fake_analyze(db: Session, job_id: int, force: bool = False):
+        job = db.get(Job, job_id)
+        assert job is not None
+        job.analysis_status = "COMPLETED"
+        job.analysis_result = JobAnalysis.model_validate(
+            {
+                "required_skills": [{"name": "Python", "category": "language"}],
+                "preferred_skills": [],
+                "minimum_years_experience": 1,
+                "preferred_years_experience": None,
+                "experience_requirements": [],
+                "education_requirements": [],
+                "required_certifications": [],
+                "preferred_certifications": [],
+                "responsibilities": [],
+                "domain_requirements": [],
+                "communication_requirements": [],
+                "leadership_requirements": [],
+                "work_authorization_requirements": [],
+                "travel_requirements": [],
+                "other_requirements": [],
+            }
+        ).model_dump()
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job, JobAnalysis.model_validate(job.analysis_result)
+
+    monkeypatch.setattr(
+        "backend.services.job_discovery.service.analyze_job",
+        _fake_analyze,
+    )
+
+    discover_status, discover_payload, _ = _run(
+        _asgi_request(
+            "POST",
+            "/api/v1/jobs/discover",
+            {
+                "resume_id": resume_payload["id"],
+                "sources": ["remotive"],
+                "max_results_per_source": 5,
+            },
+        )
+    )
+    assert discover_status == 200
+    assert discover_payload["total_discovered"] == 1
+    assert discover_payload["total_matched"] == 1
+    assert discover_payload["results"][0]["action"] == "OPEN_AND_APPLY"
+
+
 def test_job_delete_rejected_when_application_exists(db_session: Session) -> None:
     _, profile, _ = _run(_asgi_request("POST", "/api/v1/profile", {"name": "P"}))
 

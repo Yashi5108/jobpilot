@@ -31,6 +31,12 @@ class Settings(BaseSettings):
         default=True,
         alias="BROWSER_HEADLESS",
     )
+    search_provider: str | None = Field(default=None, alias="SEARCH_PROVIDER")
+    search_api_key: str | None = Field(default=None, alias="SEARCH_API_KEY")
+    search_api_base_url: str | None = Field(
+        default=None,
+        alias="SEARCH_API_BASE_URL",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

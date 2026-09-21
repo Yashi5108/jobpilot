@@ -22,6 +22,11 @@ from backend.services.job_analysis_service import (
     analyze_job,
     get_job_analysis,
 )
+from backend.services.job_discovery.service import (
+    JobDiscoveryServiceError,
+    build_search_criteria,
+    discover_jobs_for_resume,
+)
 from backend.services.job_import_service import (
     JobImportServiceError,
     import_jobs_from_csv,
@@ -35,6 +40,7 @@ from backend.services.job_service import (
     get_job,
     list_jobs,
     update_job,
+    upsert_job,
 )
 from backend.services.matching_service import (
     MatchingServiceError,
@@ -82,11 +88,15 @@ __all__ = [
     "import_jobs_from_json",
     "import_jobs_from_csv",
     "JobImportServiceError",
+    "discover_jobs_for_resume",
+    "build_search_criteria",
+    "JobDiscoveryServiceError",
     "match_job_with_resume",
     "get_job_matches",
     "get_job_match_for_resume",
     "MatchingServiceError",
     "list_jobs",
+    "upsert_job",
     "update_job",
     "JobServiceError",
     "create_profile",

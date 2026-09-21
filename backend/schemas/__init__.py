@@ -35,6 +35,13 @@ from backend.schemas.job_analysis import (
     JobExperienceRequirement,
     JobSkill,
 )
+from backend.schemas.job_discovery import (
+    JobDiscoveryErrorRead,
+    JobDiscoveryRequest,
+    JobDiscoveryResponse,
+    JobDiscoveryResultRead,
+    JobSearchCriteriaRead,
+)
 from backend.schemas.job_import import (
     JobImportRecord,
     JobImportResult,
@@ -73,6 +80,11 @@ __all__ = [
     "JobExperienceRequirement",
     "JobAnalysis",
     "JobAnalysisRead",
+    "JobDiscoveryRequest",
+    "JobSearchCriteriaRead",
+    "JobDiscoveryResultRead",
+    "JobDiscoveryErrorRead",
+    "JobDiscoveryResponse",
     "ManualJobImportRequest",
     "JobImportRecord",
     "JobImportResult",

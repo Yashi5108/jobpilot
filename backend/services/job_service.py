@@ -23,6 +23,16 @@ def get_job(db: Session, job_id: int) -> Job | None:
 
 
 def create_job(db: Session, payload: JobCreate) -> Job:
+    job, created = upsert_job(db, payload)
+    if not created:
+        raise JobServiceError(
+            "A duplicate job already exists for this source/identity.",
+            status_code=409,
+        )
+    return job
+
+
+def upsert_job(db: Session, payload: JobCreate) -> tuple[Job, bool]:
     source: JobSource
 
     if payload.source_id is not None:
@@ -39,14 +49,11 @@ def create_job(db: Session, payload: JobCreate) -> Job:
 
     duplicate = _find_duplicate_job(db, payload=payload, source_id=source.id)
     if duplicate is not None:
-        raise JobServiceError(
-            "A duplicate job already exists for this source/identity.",
-            status_code=409,
-        )
+        return duplicate, False
 
     job_data = payload.model_dump(
         exclude={"source_id", "source_name", "source_type", "source_base_url"},
-        mode="json",
+        mode="python",
     )
     if job_data.get("url"):
         job_data["url"] = str(job_data["url"])
@@ -55,7 +62,7 @@ def create_job(db: Session, payload: JobCreate) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
-    return job
+    return job, True
 
 
 def update_job(db: Session, job_id: int, payload: JobUpdate) -> Job:

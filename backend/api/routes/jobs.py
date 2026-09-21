@@ -4,12 +4,17 @@ from sqlalchemy.orm import Session
 from backend.database.database import get_db
 from backend.schemas.job import JobCreate, JobRead, JobUpdate
 from backend.schemas.job_analysis import JobAnalysisRead
+from backend.schemas.job_discovery import JobDiscoveryRequest, JobDiscoveryResponse
 from backend.schemas.job_import import JobImportResult, ManualJobImportRequest
 from backend.schemas.job_match import JobMatchRequest, JobMatchResult
 from backend.services.job_analysis_service import (
     JobAnalysisServiceError,
     analyze_job,
     get_job_analysis,
+)
+from backend.services.job_discovery.service import (
+    JobDiscoveryServiceError,
+    discover_jobs_for_resume,
 )
 from backend.services.job_import_service import (
     JobImportServiceError,
@@ -73,6 +78,25 @@ def create_job_endpoint(payload: JobCreate, db: Session = Depends(get_db)) -> Jo
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     return JobRead.model_validate(job)
+
+
+@router.post(
+    "/discover",
+    response_model=JobDiscoveryResponse,
+    summary="Discover jobs for a resume",
+    description=(
+        "Builds search criteria from analyzed resume data, discovers jobs from "
+        "supported sources, analyzes them, and returns best matches."
+    ),
+)
+def discover_jobs_endpoint(
+    payload: JobDiscoveryRequest,
+    db: Session = Depends(get_db),
+) -> JobDiscoveryResponse:
+    try:
+        return discover_jobs_for_resume(db, payload)
+    except JobDiscoveryServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.post(

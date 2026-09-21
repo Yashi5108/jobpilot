@@ -42,6 +42,8 @@ packages = [
   "backend.database",
   "backend.schemas",
   "backend.services",
+  "backend.services.job_discovery",
+  "backend.services.job_discovery.connectors",
   "backend.ai",
   "backend.browser",
   "backend.connectors",

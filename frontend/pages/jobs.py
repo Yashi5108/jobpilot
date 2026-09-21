@@ -10,7 +10,27 @@ from frontend.components.cards import job_card
 
 def render_jobs(api: ApiClient) -> None:
     st.header("Jobs")
-    st.caption("Manually add and maintain job postings.")
+    st.caption(
+        "Discover matching jobs from supported sources, then fall back to manual "
+        "entry or imports when needed."
+    )
+
+    resumes: list[dict[str, object]] = []
+    try:
+        resume_response = api.get("/api/v1/resumes")
+        if isinstance(resume_response.data, list):
+            resumes = [item for item in resume_response.data if isinstance(item, dict)]
+    except ApiClientError as exc:
+        st.warning(f"Unable to load resumes for discovery: {exc}")
+
+    analyzed_resumes = [
+        item
+        for item in resumes
+        if str(item.get("analysis_status") or "") == "COMPLETED"
+        and isinstance(item.get("id"), int)
+    ]
+
+    _render_find_jobs_section(api, analyzed_resumes)
 
     with st.expander("Import Jobs", expanded=False):
         st.write("Manual URL import")
@@ -132,7 +152,7 @@ def render_jobs(api: ApiClient) -> None:
             except ApiClientError as exc:
                 st.error(str(exc))
 
-    company_filter = st.text_input("Filter by company (optional)")
+    company_filter = st.text_input("Filter tracked jobs by company (optional)")
     jobs_path = "/api/v1/jobs"
     if company_filter.strip():
         jobs_path = f"/api/v1/jobs?company={quote_plus(company_filter.strip())}"
@@ -147,14 +167,6 @@ def render_jobs(api: ApiClient) -> None:
     if not jobs:
         st.info("No jobs found yet. Add a job to begin tracking.")
         return
-
-    resumes: list[dict[str, object]] = []
-    try:
-        resume_response = api.get("/api/v1/resumes")
-        if isinstance(resume_response.data, list):
-            resumes = [item for item in resume_response.data if isinstance(item, dict)]
-    except ApiClientError as exc:
-        st.warning(f"Unable to load resumes for matching: {exc}")
 
     resume_options = {
         int(item["id"]): str(item.get("name") or f"Resume #{item['id']}")
@@ -519,11 +531,197 @@ def _render_import_result(payload: object) -> None:
                 status = item.get("status") or "UNKNOWN"
                 title = item.get("title") or "-"
                 company = item.get("company") or "-"
-                job_id = item.get("job_id")
-                error = item.get("error")
-                line = f"[{status}] {title} @ {company}"
-                if isinstance(job_id, int):
-                    line += f" -> job_id={job_id}"
-                if error:
-                    line += f" ({error})"
-                st.write(line)
+                job_id = item.get("job_id") or "-"
+                error = item.get("error") or "-"
+                st.write(
+                    f"- [{status}] {title} @ {company} | job_id={job_id} | {error}"
+                )
+
+
+def _render_find_jobs_section(
+    api: ApiClient,
+    analyzed_resumes: list[dict[str, object]],
+) -> None:
+    st.subheader("Find Jobs")
+    st.caption(
+        "Use an analyzed resume to discover jobs, analyze them, and rank the best "
+        "matches automatically."
+    )
+
+    if not analyzed_resumes:
+        st.info("Analyze at least one resume before running job discovery.")
+        return
+
+    resume_options = {
+        int(item["id"]): str(item.get("name") or f"Resume #{item['id']}")
+        for item in analyzed_resumes
+        if isinstance(item.get("id"), int)
+    }
+    source_options = ["remotive", "web_search"]
+
+    with st.form("discover_jobs_form"):
+        selected_resume_id = st.selectbox(
+            "Analyzed resume",
+            options=list(resume_options.keys()),
+            format_func=lambda item_id: f"#{item_id} - {resume_options[item_id]}",
+        )
+        selected_sources = st.multiselect(
+            "Sources",
+            options=source_options,
+            default=["remotive"],
+        )
+        max_results = st.slider(
+            "Max results per source",
+            min_value=1,
+            max_value=25,
+            value=10,
+        )
+        requested_min_score = st.slider(
+            "Initial minimum match score",
+            min_value=0,
+            max_value=100,
+            value=50,
+        )
+        submitted = st.form_submit_button("Find Matching Jobs")
+
+    if submitted:
+        try:
+            response = api.post(
+                "/api/v1/jobs/discover",
+                {
+                    "resume_id": selected_resume_id,
+                    "sources": selected_sources or source_options,
+                    "max_results_per_source": max_results,
+                    "min_match_score": requested_min_score,
+                },
+            )
+            payload = response.data if isinstance(response.data, dict) else {}
+            st.session_state["job_discovery_results"] = payload
+        except ApiClientError as exc:
+            st.error(str(exc))
+
+    payload = st.session_state.get("job_discovery_results")
+    if not isinstance(payload, dict):
+        return
+
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    if not results:
+        st.info("No matching jobs found yet for the latest discovery run.")
+        _render_discovery_errors(payload)
+        return
+
+    available_sources = sorted(
+        {
+            str(item.get("source"))
+            for item in results
+            if isinstance(item, dict) and item.get("source")
+        }
+    )
+
+    st.write(
+        f"Discovered {payload.get('total_discovered', 0)} jobs, "
+        f"deduplicated to {payload.get('total_deduplicated', 0)}, "
+        f"matched {payload.get('total_matched', 0)}."
+    )
+
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    with filter_col1:
+        min_score = st.slider(
+            "Filter by match score",
+            min_value=0,
+            max_value=100,
+            value=50,
+            key="discovery_filter_min_score",
+        )
+    with filter_col2:
+        selected_source_filter = st.multiselect(
+            "Filter by source",
+            options=available_sources,
+            default=available_sources,
+            key="discovery_filter_sources",
+        )
+    with filter_col3:
+        location_filter = (
+            st.text_input(
+                "Filter by location",
+                key="discovery_filter_location",
+            )
+            .strip()
+            .lower()
+        )
+
+    filtered_results = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        score = int(item.get("match_score") or 0)
+        source = str(item.get("source") or "")
+        location = str(item.get("location") or "")
+        if score < min_score:
+            continue
+        if selected_source_filter and source not in selected_source_filter:
+            continue
+        if location_filter and location_filter not in location.lower():
+            continue
+        filtered_results.append(item)
+
+    for item in filtered_results:
+        _render_discovery_result_card(item)
+
+    _render_discovery_errors(payload)
+
+
+def _render_discovery_result_card(item: dict[str, object]) -> None:
+    with st.container(border=True):
+        title = str(item.get("title") or "Untitled role")
+        company = str(item.get("company") or "Unknown company")
+        score = int(item.get("match_score") or 0)
+        location = str(item.get("location") or "Location not specified")
+        sources = item.get("discovered_sources")
+        source_labels = (
+            ", ".join(sources)
+            if isinstance(sources, list)
+            else str(item.get("source") or "-")
+        )
+
+        st.markdown(f"### {title}")
+        st.caption(company)
+        st.write(f"Match Score: {score} / 100")
+        st.write(f"Location: {location}")
+        st.write(f"Source: {source_labels}")
+
+        match_payload = item.get("match")
+        if isinstance(match_payload, dict):
+            strengths = match_payload.get("strengths")
+            if isinstance(strengths, list) and strengths:
+                st.write("Strengths")
+                for strength in strengths[:3]:
+                    st.write(f"- {strength}")
+
+            gaps = match_payload.get("gaps")
+            if isinstance(gaps, list) and gaps:
+                st.write("Gaps")
+                for gap in gaps[:2]:
+                    st.write(f"- {gap}")
+
+        action = str(item.get("action") or "OPEN_AND_APPLY")
+        action_url = item.get("action_url")
+        if isinstance(action_url, str) and action_url:
+            st.link_button(
+                "Apply" if action == "APPLY" else "Open & Apply",
+                action_url,
+            )
+
+
+def _render_discovery_errors(payload: dict[str, object]) -> None:
+    errors = payload.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return
+
+    with st.expander("Discovery warnings", expanded=False):
+        for item in errors:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source") or "source"
+            message = item.get("message") or "-"
+            st.write(f"- {source}: {message}")
