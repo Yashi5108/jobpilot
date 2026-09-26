@@ -13,6 +13,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - jobpilot_data:/data/jobpilot
+      - ./backend:/app/backend
+      - ./alembic:/app/alembic
+      - ./tests:/app/tests
     ports:
       - "8000:8000"
     healthcheck:
@@ -35,6 +38,8 @@ services:
       - ${JOBPILOT_ENV_FILE:-.env}
     environment:
       JOBPILOT_API_BASE_URL: http://backend:8000
+    volumes:
+      - ./frontend:/app/frontend
     ports:
       - "8501:8501"
     healthcheck:
