@@ -51,6 +51,7 @@ packages = [
   "backend.utils",
   "frontend",
   "frontend.components",
+  "frontend.pages",
   "tests"
 ]
 
