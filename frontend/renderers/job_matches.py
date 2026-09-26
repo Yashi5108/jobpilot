@@ -145,4 +145,4 @@ def render_job_matches(api: ApiClient) -> None:
                     ):
                         st.session_state["selected_job_id"] = job.get("id")
                         st.session_state["selected_job"] = job
-                        st.switch_page("pages/6_applications.py")
+                        st.switch_page("6_applications.py")

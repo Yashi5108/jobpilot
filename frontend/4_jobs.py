@@ -1,7 +1,7 @@
 import streamlit as st
 
 from frontend.api_client import ApiClient
-from frontend.pages.jobs import render_jobs
+from frontend.renderers.jobs import render_jobs
 
 st.set_page_config(page_title="JobPilot Jobs", layout="wide", page_icon="💼")
 st.title("JobPilot")
