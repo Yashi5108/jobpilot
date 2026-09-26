@@ -158,6 +158,73 @@ Sensitive local files remain excluded by `.gitignore`:
 .venv/bin/black --check .
 ```
 
+## Docker
+
+### Prerequisites
+
+- Docker Engine and the Compose plugin
+- A configured `.env` copied from `.env.example`
+- Ollama available either on the host or through the optional Docker profile
+
+### Environment Setup
+
+Copy the example file and adjust secrets and endpoints:
+
+```bash
+cp .env.example .env
+```
+
+Set `SEARCH_API_KEY` for discovery if you want web search.
+If you are running Ollama on the host, keep `OLLAMA_BASE_URL=http://host.docker.internal:11434`.
+If you want Ollama in Docker, change it to `http://ollama:11434` and start the Ollama profile.
+
+### Start the Stack
+
+Backend and frontend:
+
+```bash
+docker compose up --build
+```
+
+Optional Ollama container:
+
+```bash
+docker compose --profile ollama up --build
+```
+
+### URLs
+
+- Frontend: http://localhost:8501
+- Backend: http://localhost:8000
+- Backend health: http://localhost:8000/health
+- API health: http://localhost:8000/api/v1/health
+
+### Stop
+
+```bash
+docker compose down
+```
+
+To remove persistent volumes as well:
+
+```bash
+docker compose down -v
+```
+
+### Persistent Data
+
+- SQLite data is stored in the named `jobpilot_data` volume
+- Resumes are stored under `/data/jobpilot/resumes` inside that volume
+- Ollama models are stored in the named `ollama_data` volume when the optional profile is used
+
+### Run Tests
+
+```bash
+.venv/bin/pytest -q
+.venv/bin/ruff check .
+.venv/bin/black --check .
+```
+
 ## Notes
 
 - Keep all AI outputs validated with Pydantic before persistence.

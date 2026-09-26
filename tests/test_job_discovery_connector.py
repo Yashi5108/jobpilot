@@ -318,7 +318,12 @@ def test_web_search_connector_uses_resume_queries_and_deduplicates(
     connector = WebSearchConnector(limit_per_source=2, provider=_Provider())
     jobs = connector.search(criteria)
 
-    assert requested_queries == ["Senior Backend Engineer"]
+    assert len(requested_queries) == 1
+    assert "Senior Backend Engineer" in requested_queries[0]
+    assert (
+        "jobs" in requested_queries[0].lower()
+        or "apply" in requested_queries[0].lower()
+    )
     assert len(jobs) == 2
     assert jobs[0].job_url == "https://example.com/jobs/backend-engineer"
     assert jobs[1].company == "Example Org"
@@ -358,11 +363,19 @@ def test_build_search_queries_generates_ranked_variants() -> None:
     )
 
     assert 3 <= len(queries) <= 5
-    assert queries[0] == "Senior Python Backend Engineer"
+    assert any("jobs" in item.lower() or "apply" in item.lower() for item in queries)
     assert any("FastAPI" in item and "AWS" in item for item in queries)
     assert any("Remote" in item for item in queries)
     assert any("India" in item for item in queries)
-    assert all("jobs" not in item.lower() for item in queries)
+    assert any("site:linkedin.com/jobs/view" in item for item in queries)
+    assert any(
+        "site:indeed.com/viewjob" in item or "site:naukri.com/job-listings" in item
+        for item in queries
+    )
+    assert any(
+        "site:boards.greenhouse.io" in item or "site:jobs.lever.co" in item
+        for item in queries
+    )
 
 
 def test_build_search_queries_deduplicates_near_duplicates_and_honors_max() -> None:
@@ -383,7 +396,54 @@ def test_build_search_queries_deduplicates_near_duplicates_and_honors_max() -> N
     )
 
     assert len(queries) == 3
-    assert queries[0] == "Senior Backend Engineer"
     assert len({frozenset(item.lower().split()) for item in queries}) == len(queries)
     assert any("Python" in item for item in queries)
     assert any("Remote" in item or "India" in item for item in queries)
+
+
+@pytest.mark.parametrize(
+    ("job_url", "title", "snippet"),
+    [
+        (
+            "https://www.youtube.com/watch?v=123",
+            "Backend Engineering Tutorial",
+            "Video tutorial for FastAPI backend engineering.",
+        ),
+        (
+            "https://en.wikipedia.org/wiki/FastAPI",
+            "FastAPI - Wikipedia",
+            "Reference article for FastAPI.",
+        ),
+        (
+            "https://www.reddit.com/r/Python/comments/123/backend_engineer_role/",
+            "Backend engineer role discussion",
+            "Community discussion thread.",
+        ),
+        (
+            "https://fastapi.tiangolo.com/tutorial/",
+            "FastAPI tutorial",
+            "Official FastAPI documentation.",
+        ),
+        (
+            "https://careers.example.com/about",
+            "About careers at Example",
+            "Learn more about our company and culture.",
+        ),
+        (
+            "https://www.glassdoor.co.uk/Job/fastapi-jobs-SRCH_KO0,7.htm",
+            "200 Fastapi jobs in United Kingdom",
+            "Browse job listings and salaries.",
+        ),
+        (
+            "https://www.ziprecruiter.com/Jobs/Sr-Python-Aws-Developer",
+            "Sr Python Aws Developer Jobs (NOW HIRING)",
+            "Search jobs across companies.",
+        ),
+    ],
+)
+def test_is_likely_job_result_rejects_docs_media_and_generic_pages(
+    job_url: str,
+    title: str,
+    snippet: str,
+) -> None:
+    assert _is_likely_job_result(job_url, title, snippet) is False

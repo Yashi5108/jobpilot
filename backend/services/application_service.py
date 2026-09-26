@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.database.models import (
@@ -11,6 +11,7 @@ from backend.database.models import (
     ApplicationStatus,
     Job,
     JobMatch,
+    QuestionStatus,
     Resume,
     UserProfile,
 )
@@ -65,10 +66,19 @@ def list_applications(db: Session) -> list[Application]:
     return list(db.scalars(select(Application).order_by(Application.id.asc())).all())
 
 
-def list_application_tracker_items(db: Session) -> list[ApplicationTrackerItem]:
-    applications = list(
-        db.scalars(select(Application).order_by(Application.updated_at.desc())).all()
-    )
+def list_application_tracker_items(
+    db: Session,
+    *,
+    status: ApplicationStatus | None = None,
+    company: str | None = None,
+) -> list[ApplicationTrackerItem]:
+    statement = select(Application).join(Job).order_by(Application.updated_at.desc())
+    if status is not None:
+        statement = statement.where(Application.status == status)
+    if company:
+        statement = statement.where(func.lower(Job.company) == company.strip().lower())
+
+    applications = list(db.scalars(statement).all())
 
     results: list[ApplicationTrackerItem] = []
     for app in applications:
@@ -171,6 +181,33 @@ def approve_application_review(db: Session, application: Application) -> Applica
             status_code=409,
         )
 
+    details = application.preparation_details or {}
+    cover_letter_status = (
+        details.get("cover_letter_status") if isinstance(details, dict) else None
+    )
+    if (
+        application.cover_letter
+        and cover_letter_status != QuestionStatus.APPROVED.value
+    ):
+        raise ApplicationServiceError(
+            "Cover letter must be explicitly approved before submission approval.",
+            status_code=409,
+        )
+
+    unresolved_questions = [
+        item.question
+        for item in application.questions
+        if item.status != QuestionStatus.APPROVED or not (item.answer or "").strip()
+    ]
+    if unresolved_questions:
+        raise ApplicationServiceError(
+            (
+                "All screening answers must be reviewed and approved before "
+                "submission approval."
+            ),
+            status_code=409,
+        )
+
     application.user_approved = True
     application.approved_at = datetime.now(UTC)
     db.add(application)
@@ -220,6 +257,19 @@ def _record_event(
     event_type: str,
     description: str,
 ) -> None:
+    latest = db.scalar(
+        select(ApplicationEvent)
+        .where(ApplicationEvent.application_id == application_id)
+        .order_by(ApplicationEvent.created_at.desc(), ApplicationEvent.id.desc())
+        .limit(1)
+    )
+    if (
+        latest is not None
+        and latest.event_type == event_type
+        and latest.description == description
+    ):
+        return
+
     event = ApplicationEvent(
         application_id=application_id,
         event_type=event_type,

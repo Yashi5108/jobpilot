@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-MATCH_WEIGHTS: dict[str, int] = {
+from backend.core.config import get_settings
+
+DEFAULT_MATCH_WEIGHTS: dict[str, int] = {
     # Required skills are the strongest signal for deterministic fit.
     "required_skills": 50,
     # Preferred skills contribute, but less than required qualifications.
@@ -12,6 +14,8 @@ MATCH_WEIGHTS: dict[str, int] = {
     "certification": 7,
     "domain": 3,
 }
+
+MATCH_WEIGHTS = DEFAULT_MATCH_WEIGHTS
 
 UNKNOWN_SCORE = 0.5
 
@@ -23,12 +27,13 @@ class ScoreBreakdown:
 
 
 def compute_final_score(dimension_scores: dict[str, float | None]) -> ScoreBreakdown:
+    match_weights = _match_weights()
     applicable_total_weight = 0
     weighted_points = 0.0
 
     normalized_dimension_scores: dict[str, int | None] = {}
 
-    for dimension, weight in MATCH_WEIGHTS.items():
+    for dimension, weight in match_weights.items():
         score = dimension_scores.get(dimension)
         if score is None:
             normalized_dimension_scores[dimension] = None
@@ -50,3 +55,15 @@ def compute_final_score(dimension_scores: dict[str, float | None]) -> ScoreBreak
         final_score=final,
         normalized_dimension_scores=normalized_dimension_scores,
     )
+
+
+def _match_weights() -> dict[str, int]:
+    settings = get_settings()
+    return {
+        "required_skills": settings.match_weight_required_skills,
+        "preferred_skills": settings.match_weight_preferred_skills,
+        "experience": settings.match_weight_experience,
+        "education": settings.match_weight_education,
+        "certification": settings.match_weight_certification,
+        "domain": settings.match_weight_domain,
+    }

@@ -26,6 +26,7 @@ from backend.schemas.application_preparation import (
     ApplicationPreparationRead,
     ApplicationQuestionRead,
     ApplicationReviewRead,
+    ApplicationReviewUpdateRequest,
     PrepareApplicationRequest,
 )
 from backend.schemas.job_analysis import JobAnalysis
@@ -38,6 +39,9 @@ class ApplicationPreparationServiceError(ValueError):
     def __init__(self, message: str, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+_COVER_LETTER_STATUS_KEY = "cover_letter_status"
 
 
 def prepare_application(
@@ -115,6 +119,8 @@ def prepare_application(
         match_result=match_result,
     )
     application.cover_letter = cover_letter
+    details = _preparation_details(application)
+    details[_COVER_LETTER_STATUS_KEY] = _initial_review_status(cover_letter).value
 
     existing_questions = {
         item.question.strip().lower(): item
@@ -150,12 +156,15 @@ def prepare_application(
         db.add(existing)
 
     application.resume_id = resume.id
-    application.preparation_details = {
-        "selected_resume_id": resume.id,
-        "match_score": match_result.score,
-        "unknown_fields": [],
-        "fields_to_submit": [],
-    }
+    details.update(
+        {
+            "selected_resume_id": resume.id,
+            "match_score": match_result.score,
+            "unknown_fields": [],
+            "fields_to_submit": [],
+        }
+    )
+    application.preparation_details = details
     db.add(application)
     db.commit()
     db.refresh(application)
@@ -190,8 +199,8 @@ def get_application_review(db: Session, application_id: int) -> ApplicationRevie
     unknown_fields: list[str] = []
     fields_to_submit: list[dict[str, str]] = []
 
-    details = application.preparation_details
-    if isinstance(details, dict):
+    details = _preparation_details(application)
+    if details:
         raw_score = details.get("match_score")
         if isinstance(raw_score, int):
             match_score = raw_score
@@ -228,11 +237,85 @@ def get_application_review(db: Session, application_id: int) -> ApplicationRevie
         match_score=match_score,
         selected_resume_id=application.resume_id,
         cover_letter=application.cover_letter,
+        cover_letter_status=_question_status_from_details(
+            details.get(_COVER_LETTER_STATUS_KEY)
+        ),
         screening_answers=[_question_read(item) for item in application.questions],
         fields_to_submit=fields_to_submit,
         unknown_fields=unknown_fields,
         approved_at=application.approved_at,
     )
+
+
+def update_application_review(
+    db: Session,
+    application_id: int,
+    payload: ApplicationReviewUpdateRequest,
+) -> ApplicationReviewRead:
+    application = db.get(Application, application_id)
+    if application is None:
+        raise ApplicationPreparationServiceError(
+            "Application not found",
+            status_code=404,
+        )
+
+    if application.status != ApplicationStatus.READY_FOR_REVIEW:
+        raise ApplicationPreparationServiceError(
+            "Application must be READY_FOR_REVIEW before review edits.",
+            status_code=409,
+        )
+
+    details = _preparation_details(application)
+
+    if payload.cover_letter is not None:
+        application.cover_letter = payload.cover_letter.strip() or None
+        if application.cover_letter is None:
+            details[_COVER_LETTER_STATUS_KEY] = QuestionStatus.NEEDS_USER_INPUT.value
+
+    if payload.cover_letter_status is not None:
+        _validate_review_content(
+            answer=application.cover_letter,
+            status=payload.cover_letter_status,
+            label="Cover letter",
+        )
+        details[_COVER_LETTER_STATUS_KEY] = payload.cover_letter_status.value
+
+    question_map = {item.id: item for item in application.questions}
+    for item in payload.screening_answers:
+        question = question_map.get(item.id)
+        if question is None:
+            raise ApplicationPreparationServiceError(
+                f"Question {item.id} not found for this application.",
+                status_code=404,
+            )
+
+        if item.answer is not None:
+            question.answer = item.answer.strip() or None
+
+        if item.status is not None:
+            _validate_review_content(
+                answer=question.answer,
+                status=item.status,
+                label=f"Question {question.id}",
+            )
+            question.status = item.status
+
+        db.add(question)
+
+    application.user_approved = False
+    application.approved_at = None
+    application.preparation_details = details
+    db.add(application)
+    db.commit()
+    db.refresh(application)
+
+    _record_event(
+        db,
+        application.id,
+        ApplicationStatus.READY_FOR_REVIEW.value,
+        "Application review content updated",
+    )
+    return get_application_review(db, application.id)
 
 
 def regenerate_cover_letter(db: Session, application_id: int) -> ApplicationReviewRead:
@@ -277,6 +360,11 @@ def regenerate_cover_letter(db: Session, application_id: int) -> ApplicationRevi
         job_description=job.description or "",
         match_result=match_result,
     )
+    details = _preparation_details(application)
+    details[_COVER_LETTER_STATUS_KEY] = _initial_review_status(
+        application.cover_letter
+    ).value
+    application.preparation_details = details
     db.add(application)
     db.commit()
     db.refresh(application)
@@ -323,7 +411,6 @@ def _get_or_create_application(
             status=ApplicationStatus.DISCOVERED,
         ),
     )
-    _record_event(db, application.id, "DISCOVERED", "Application created")
     return application
 
 
@@ -348,6 +435,19 @@ def _record_event(
     event_type: str,
     description: str,
 ) -> None:
+    latest = db.scalar(
+        select(ApplicationEvent)
+        .where(ApplicationEvent.application_id == application_id)
+        .order_by(ApplicationEvent.created_at.desc(), ApplicationEvent.id.desc())
+        .limit(1)
+    )
+    if (
+        latest is not None
+        and latest.event_type == event_type
+        and latest.description == description
+    ):
+        return
+
     event = ApplicationEvent(
         application_id=application_id,
         event_type=event_type,
@@ -356,6 +456,41 @@ def _record_event(
     )
     db.add(event)
     db.commit()
+
+
+def _preparation_details(application: Application) -> dict[str, object]:
+    details = application.preparation_details
+    if isinstance(details, dict):
+        return dict(details)
+    return {}
+
+
+def _question_status_from_details(value: object) -> QuestionStatus | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return QuestionStatus(value)
+    except ValueError:
+        return None
+
+
+def _initial_review_status(content: str | None) -> QuestionStatus:
+    if content and content.strip():
+        return QuestionStatus.DRAFT
+    return QuestionStatus.NEEDS_USER_INPUT
+
+
+def _validate_review_content(
+    *,
+    answer: str | None,
+    status: QuestionStatus,
+    label: str,
+) -> None:
+    if status == QuestionStatus.APPROVED and not (answer or "").strip():
+        raise ApplicationPreparationServiceError(
+            f"{label} must have content before approval.",
+            status_code=422,
+        )
 
 
 def _question_read(item: ApplicationQuestion) -> ApplicationQuestionRead:

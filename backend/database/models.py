@@ -37,6 +37,7 @@ class QuestionStatus(str, Enum):
     DRAFT = "DRAFT"
     NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
     APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 
 class UserProfile(Base):

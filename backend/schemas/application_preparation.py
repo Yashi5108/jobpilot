@@ -32,6 +32,18 @@ class ApplicationQuestionRead(BaseModel):
     updated_at: datetime
 
 
+class ApplicationQuestionUpdate(BaseModel):
+    id: int = Field(gt=0)
+    answer: str | None = None
+    status: QuestionStatus | None = None
+
+
+class ApplicationReviewUpdateRequest(BaseModel):
+    cover_letter: str | None = None
+    cover_letter_status: QuestionStatus | None = None
+    screening_answers: list[ApplicationQuestionUpdate] = Field(default_factory=list)
+
+
 class ApplicationPreparationRead(BaseModel):
     application_id: int
     status: ApplicationStatus
@@ -52,6 +64,7 @@ class ApplicationReviewRead(BaseModel):
     match_score: int | None
     selected_resume_id: int | None
     cover_letter: str | None
+    cover_letter_status: QuestionStatus | None = None
     screening_answers: list[ApplicationQuestionRead]
     fields_to_submit: list[dict[str, str]] = Field(default_factory=list)
     unknown_fields: list[str] = Field(default_factory=list)

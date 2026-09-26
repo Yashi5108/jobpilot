@@ -3,17 +3,28 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.database.database import Base
-from backend.database.models import Job, QuestionStatus, Resume, UserProfile
-from backend.schemas.application_preparation import PrepareApplicationRequest
+from backend.database.models import (
+    ApplicationEvent,
+    Job,
+    QuestionStatus,
+    Resume,
+    UserProfile,
+)
+from backend.schemas.application_preparation import (
+    ApplicationReviewUpdateRequest,
+    PrepareApplicationRequest,
+)
 from backend.schemas.job_analysis import JobAnalysis
 from backend.schemas.resume_analysis import CandidateProfile
 from backend.services.application_preparation_service import (
+    get_application_review,
     prepare_application,
     regenerate_cover_letter,
+    update_application_review,
 )
 
 
@@ -170,3 +181,89 @@ def test_regenerate_cover_letter_updates_draft(
     review = regenerate_cover_letter(db_session, prepared.application_id)
 
     assert review.cover_letter == "Regenerated cover letter"
+
+
+def test_update_application_review_persists_edits_and_statuses(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_id, resume_id, job_id = _seed_ready_entities(db_session)
+
+    monkeypatch.setattr(
+        "backend.services.application_preparation_service.generate_cover_letter",
+        lambda **_: "Initial cover letter",
+    )
+    monkeypatch.setattr(
+        "backend.services.application_preparation_service.generate_screening_answer",
+        lambda **_: ("Draft answer", QuestionStatus.DRAFT),
+    )
+
+    prepared = prepare_application(
+        db_session,
+        PrepareApplicationRequest(
+            job_id=job_id,
+            profile_id=profile_id,
+            resume_id=resume_id,
+        ),
+    )
+
+    updated = update_application_review(
+        db_session,
+        prepared.application_id,
+        ApplicationReviewUpdateRequest.model_validate(
+            {
+                "cover_letter": "Reviewed cover letter",
+                "cover_letter_status": "APPROVED",
+                "screening_answers": [
+                    {
+                        "id": prepared.questions[0].id,
+                        "answer": "Reviewed answer",
+                        "status": "APPROVED",
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert updated.cover_letter == "Reviewed cover letter"
+    assert updated.cover_letter_status == QuestionStatus.APPROVED
+    assert updated.screening_answers[0].answer == "Reviewed answer"
+    assert updated.screening_answers[0].status == QuestionStatus.APPROVED
+
+    review = get_application_review(db_session, prepared.application_id)
+    assert review.cover_letter_status == QuestionStatus.APPROVED
+
+
+def test_prepare_application_does_not_duplicate_discovered_events(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_id, resume_id, job_id = _seed_ready_entities(db_session)
+
+    monkeypatch.setattr(
+        "backend.services.application_preparation_service.generate_cover_letter",
+        lambda **_: "Cover letter draft",
+    )
+    monkeypatch.setattr(
+        "backend.services.application_preparation_service.generate_screening_answer",
+        lambda **_: ("Draft answer", QuestionStatus.DRAFT),
+    )
+
+    prepared = prepare_application(
+        db_session,
+        PrepareApplicationRequest(
+            job_id=job_id,
+            profile_id=profile_id,
+            resume_id=resume_id,
+        ),
+    )
+
+    events = list(
+        db_session.scalars(
+            select(ApplicationEvent).where(
+                ApplicationEvent.application_id == prepared.application_id
+            )
+        ).all()
+    )
+    discovered_events = [item for item in events if item.event_type == "DISCOVERED"]
+    assert len(discovered_events) == 1

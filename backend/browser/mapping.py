@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from backend.database.models import Application, ApplicationQuestion, UserProfile
 
@@ -13,15 +14,24 @@ class BrowserField:
     required: bool = False
 
 
-def map_fields(
+@dataclass(frozen=True)
+class FieldMappingResult:
+    field: str
+    label: str
+    field_type: str
+    required: bool
+    value: str | None
+    status: str
+    message: str | None = None
+
+
+def map_field_results(
     *,
     profile: UserProfile,
     application: Application,
     fields: list[BrowserField],
-) -> tuple[list[dict[str, str]], list[str]]:
-    mapped: list[dict[str, str]] = []
-    unknown: list[str] = []
-
+) -> list[FieldMappingResult]:
+    results: list[FieldMappingResult] = []
     qa_map = _question_map(application.questions)
 
     for field in fields:
@@ -32,16 +42,63 @@ def map_fields(
             qa_map=qa_map,
         )
         if value is None:
-            if field.required:
-                unknown.append(field.label or field.name)
+            results.append(
+                FieldMappingResult(
+                    field=field.name,
+                    label=field.label,
+                    field_type=field.field_type,
+                    required=field.required,
+                    value=None,
+                    status=("NEEDS_USER_INPUT" if field.required else "SKIPPED"),
+                    message=(
+                        "No verified user value available."
+                        if field.required
+                        else "No verified value available for optional field."
+                    ),
+                )
+            )
+            continue
+
+        results.append(
+            FieldMappingResult(
+                field=field.name,
+                label=field.label,
+                field_type=field.field_type,
+                required=field.required,
+                value=value,
+                status="READY",
+                message=None,
+            )
+        )
+
+    return results
+
+
+def map_fields(
+    *,
+    profile: UserProfile,
+    application: Application,
+    fields: list[BrowserField],
+) -> tuple[list[dict[str, str]], list[str]]:
+    mapped: list[dict[str, str]] = []
+    unknown: list[str] = []
+
+    for field in map_field_results(
+        profile=profile,
+        application=application,
+        fields=fields,
+    ):
+        if field.status != "READY" or field.value is None:
+            if field.status == "NEEDS_USER_INPUT":
+                unknown.append(field.label or field.field)
             continue
 
         mapped.append(
             {
-                "field": field.name,
+                "field": field.field,
                 "label": field.label,
                 "type": field.field_type,
-                "value": value,
+                "value": field.value,
             }
         )
 
@@ -67,6 +124,10 @@ def _resolve_value(
         return profile.location
     if any(token in key for token in ["cover letter", "cover_letter"]):
         return application.cover_letter
+    if any(token in key for token in ["resume", "cv", "upload"]):
+        resume = application.resume
+        if resume and resume.file_path and Path(resume.file_path).exists():
+            return resume.file_path
 
     for question, answer in qa_map.items():
         if question and question in key:

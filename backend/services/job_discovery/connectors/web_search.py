@@ -20,6 +20,19 @@ from backend.services.job_discovery.models import (
 
 DEFAULT_MAX_SEARCH_QUERIES = 5
 
+_JOB_INTENT_TERMS = (
+    "jobs",
+    "careers",
+    "apply",
+    "opening",
+)
+
+_SOURCE_QUERY_HINTS = (
+    "site:linkedin.com/jobs/view",
+    "site:indeed.com/viewjob OR site:naukri.com/job-listings",
+    "site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com",
+)
+
 _SEARCH_ENGINE_LABELS = {
     "duckduckgo",
     "linkedin",
@@ -80,6 +93,17 @@ _REJECTED_DOMAIN_TOKENS = {
     "twitter",
     "medium",
     "substack",
+    "reddit",
+    "youtube",
+    "youtu.be",
+    "wikipedia",
+    "github",
+    "geeksforgeeks",
+    "w3schools",
+    "programiz",
+    "codecademy",
+    "python.org",
+    "docs.",
 }
 
 _REJECTED_PATH_PATTERNS = (
@@ -102,6 +126,19 @@ _REJECTED_PATH_PATTERNS = (
     "/profiles/",
     "/people/",
     "/posts/",
+    "/docs",
+    "/documentation",
+    "/tutorial",
+    "/tutorials",
+    "/learn",
+    "/course",
+    "/courses",
+    "/watch",
+    "/wiki",
+    "/community",
+    "/forum",
+    "/forums",
+    "/questions",
 )
 
 _JOB_PATH_KEYWORDS = (
@@ -131,6 +168,33 @@ _JOB_TITLE_HINTS = (
     "designer",
     "specialist",
     "consultant",
+)
+
+_NON_JOB_TEXT_TOKENS = (
+    "blog",
+    "tutorial",
+    "tutorials",
+    "documentation",
+    "docs",
+    "course",
+    "courses",
+    "video",
+    "wikipedia",
+    "reddit",
+    "forum",
+    "community",
+    "newsletter",
+    "article",
+    "articles",
+    "guide",
+    "lesson",
+)
+
+_LISTING_TITLE_PATTERNS = (
+    r"\b\d+[+]?\s+.+\bjobs\b",
+    r"\bjob vacancies\b",
+    r"\bjobs in\b",
+    r"\bnow hiring\b",
 )
 
 
@@ -194,33 +258,45 @@ def _build_search_queries(
     top_skills = _dedupe_terms(criteria.skills)[:3]
     location_terms = _build_location_terms(criteria)
     queries: list[str] = []
-
-    if role_candidates:
-        queries.append(role_candidates[0])
-
-    primary_base = _strip_seniority(role_candidates[0]) if role_candidates else None
+    primary_role = role_candidates[0] if role_candidates else None
+    primary_base = _strip_seniority(primary_role) if primary_role else None
     secondary_base = (
         _strip_seniority(role_candidates[1]) if len(role_candidates) > 1 else None
     )
 
-    if primary_base:
+    if primary_role:
         queries.append(
-            _compose_query(primary_base, seniority=seniority, skills=top_skills)
+            _compose_query(
+                primary_role,
+                skills=top_skills[:2],
+                location_terms=location_terms,
+                intent_terms=_JOB_INTENT_TERMS[:3],
+            )
         )
+
+    if primary_base:
         queries.append(
             _compose_query(
                 primary_base,
+                seniority=seniority,
+                skills=top_skills,
+                location_terms=location_terms,
+                intent_terms=_JOB_INTENT_TERMS,
+            )
+        )
+
+    for source_hint in _SOURCE_QUERY_HINTS:
+        role_text = primary_base or primary_role
+        if role_text is None:
+            break
+        queries.append(
+            _compose_query(
+                role_text,
                 seniority=seniority,
                 skills=top_skills[:2],
                 location_terms=location_terms,
-            )
-        )
-        queries.append(
-            _compose_query(
-                primary_base,
-                seniority=seniority,
-                skills=top_skills[:1],
-                location_terms=location_terms,
+                intent_terms=("jobs", "apply"),
+                source_hint=source_hint,
             )
         )
 
@@ -231,17 +307,7 @@ def _build_search_queries(
                 seniority=seniority,
                 skills=top_skills[:2],
                 location_terms=location_terms,
-            )
-        )
-
-    for skill in top_skills:
-        if primary_base is None:
-            break
-        queries.append(
-            _compose_query(
-                f"{skill} {primary_base}",
-                seniority=seniority,
-                location_terms=location_terms,
+                intent_terms=("jobs", "apply"),
             )
         )
 
@@ -334,6 +400,8 @@ def _compose_query(
     seniority: str | None = None,
     skills: list[str] | None = None,
     location_terms: list[str] | None = None,
+    intent_terms: tuple[str, ...] | None = None,
+    source_hint: str | None = None,
 ) -> str:
     role_text = _clean_query_phrase(role)
     if not role_text:
@@ -364,6 +432,19 @@ def _compose_query(
             continue
         parts.append(location_text)
         existing_tokens.update(location_tokens)
+
+    for intent_term in intent_terms or ():
+        cleaned_intent = _clean_query_phrase(intent_term)
+        if not cleaned_intent:
+            continue
+        intent_tokens = set(_tokenize_query(cleaned_intent))
+        if intent_tokens and intent_tokens.issubset(existing_tokens):
+            continue
+        parts.append(cleaned_intent)
+        existing_tokens.update(intent_tokens)
+
+    if source_hint:
+        parts.append(source_hint)
 
     return " ".join(parts)
 
@@ -397,7 +478,7 @@ def _dedupe_search_queries(values: list[str], max_queries: int) -> list[str]:
     token_sets: list[set[str]] = []
 
     for value in values:
-        cleaned = _clean_query_phrase(value)
+        cleaned = _normalize_query(value)
         if not cleaned:
             continue
 
@@ -413,6 +494,10 @@ def _dedupe_search_queries(values: list[str], max_queries: int) -> list[str]:
             break
 
     return deduped
+
+
+def _normalize_query(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" -|,")
 
 
 def _tokenize_query(value: str) -> list[str]:
@@ -476,10 +561,15 @@ def _is_likely_job_result(job_url: str, title: str, snippet: str) -> bool:
     title_text = title.lower()
     snippet_text = snippet.lower()
     combined_text = f"{title_text} {snippet_text}"
+    has_job_path = any(keyword in path for keyword in _JOB_PATH_KEYWORDS)
 
     if any(token in hostname for token in _REJECTED_DOMAIN_TOKENS):
         return False
     if any(pattern in path for pattern in _REJECTED_PATH_PATTERNS):
+        return False
+    if _is_listing_page(hostname, path, title_text):
+        return False
+    if _looks_like_non_job_content(combined_text) and not has_job_path:
         return False
 
     if _is_linkedin_job_url(hostname, path):
@@ -494,9 +584,22 @@ def _is_likely_job_result(job_url: str, title: str, snippet: str) -> bool:
     if any(domain in hostname for domain in _PREFERRED_JOB_DOMAINS):
         return False
 
-    has_job_path = any(keyword in path for keyword in _JOB_PATH_KEYWORDS)
     has_job_text = any(keyword in combined_text for keyword in _JOB_TITLE_HINTS)
     return has_job_path and has_job_text
+
+
+def _looks_like_non_job_content(text: str) -> bool:
+    return any(token in text for token in _NON_JOB_TEXT_TOKENS)
+
+
+def _is_listing_page(hostname: str, path: str, title_text: str) -> bool:
+    if any(re.search(pattern, title_text) for pattern in _LISTING_TITLE_PATTERNS):
+        return True
+    if "glassdoor" in hostname and "srch_ko" in path:
+        return True
+    if "ziprecruiter.com" in hostname and path.startswith("/jobs/"):
+        return True
+    return False
 
 
 def _is_linkedin_job_url(hostname: str, path: str) -> bool:

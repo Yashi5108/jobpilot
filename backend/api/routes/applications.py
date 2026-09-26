@@ -7,6 +7,7 @@ from backend.browser.assistant import (
 )
 from backend.browser.mapping import BrowserField
 from backend.database.database import get_db
+from backend.database.models import ApplicationStatus
 from backend.schemas.application import (
     ApplicationApproveAction,
     ApplicationCreate,
@@ -14,9 +15,14 @@ from backend.schemas.application import (
     ApplicationStatusUpdate,
     ApplicationSubmitAction,
 )
+from backend.schemas.application_execution import (
+    ApplicationExecutionRequest,
+    ApplicationExecutionResponse,
+)
 from backend.schemas.application_preparation import (
     ApplicationPreparationRead,
     ApplicationReviewRead,
+    ApplicationReviewUpdateRequest,
     PrepareApplicationRequest,
 )
 from backend.schemas.application_tracker import ApplicationTrackerItem
@@ -24,11 +30,16 @@ from backend.schemas.browser_assistant import (
     BrowserAssistRequest,
     BrowserAssistResponse,
 )
+from backend.services.application_execution_service import (
+    ApplicationExecutionServiceError,
+    execute_application,
+)
 from backend.services.application_preparation_service import (
     ApplicationPreparationServiceError,
     get_application_review,
     prepare_application,
     regenerate_cover_letter,
+    update_application_review,
 )
 from backend.services.application_service import (
     ApplicationServiceError,
@@ -110,9 +121,11 @@ def update_application_status_endpoint(
     description="Returns enriched application tracker rows with timeline events.",
 )
 def read_application_tracker(
+    status: ApplicationStatus | None = None,
+    company: str | None = None,
     db: Session = Depends(get_db),
 ) -> list[ApplicationTrackerItem]:
-    return list_application_tracker_items(db)
+    return list_application_tracker_items(db, status=status, company=company)
 
 
 @router.post(
@@ -143,6 +156,26 @@ def read_application_review(
 ) -> ApplicationReviewRead:
     try:
         return get_application_review(db, application_id)
+    except ApplicationPreparationServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/{application_id}/review",
+    response_model=ApplicationReviewRead,
+    summary="Update application review",
+    description=(
+        "Persists user edits and review statuses for cover letter and "
+        "screening answers."
+    ),
+)
+def update_application_review_endpoint(
+    application_id: int,
+    payload: ApplicationReviewUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ApplicationReviewRead:
+    try:
+        return update_application_review(db, application_id, payload)
     except ApplicationPreparationServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -209,6 +242,26 @@ def confirm_submission_endpoint(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     return ApplicationRead.model_validate(updated)
+
+
+@router.post(
+    "/{application_id}/execute",
+    response_model=ApplicationExecutionResponse,
+    summary="Execute application",
+    description=(
+        "Uses an authorized API submission when supported, otherwise runs a "
+        "browser-assisted fill or returns OPEN_AND_APPLY."
+    ),
+)
+def execute_application_endpoint(
+    application_id: int,
+    payload: ApplicationExecutionRequest,
+    db: Session = Depends(get_db),
+) -> ApplicationExecutionResponse:
+    try:
+        return execute_application(db, application_id, payload)
+    except ApplicationExecutionServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.post(

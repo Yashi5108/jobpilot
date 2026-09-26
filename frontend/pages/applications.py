@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from urllib.parse import quote_plus
+
 import streamlit as st
 
-from backend.database.models import ApplicationStatus
+from backend.database.models import ApplicationStatus, QuestionStatus
 from frontend.api_client import ApiClient, ApiClientError
 
 
@@ -11,8 +13,28 @@ def render_applications(api: ApiClient) -> None:
 
     _render_prepare_section(api)
 
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        status_options = ["ALL", *[status.value for status in ApplicationStatus]]
+        selected_status = st.selectbox(
+            "Filter by status",
+            options=status_options,
+            index=0,
+        )
+    with filter_col2:
+        company_filter = st.text_input("Filter by company")
+
+    tracker_path = "/api/v1/applications/tracker"
+    tracker_params: list[str] = []
+    if selected_status != "ALL":
+        tracker_params.append(f"status={selected_status}")
+    if company_filter.strip():
+        tracker_params.append(f"company={quote_plus(company_filter.strip())}")
+    if tracker_params:
+        tracker_path += "?" + "&".join(tracker_params)
+
     try:
-        tracker_response = api.get("/api/v1/applications/tracker")
+        tracker_response = api.get(tracker_path)
     except ApiClientError as exc:
         st.error(str(exc))
         return
@@ -144,7 +166,7 @@ def _render_tracker_item(api: ApiClient, item: dict[str, object]) -> None:
 
         review_payload = st.session_state.get(f"review_payload_{app_id}")
         if isinstance(review_payload, dict):
-            _render_review_payload(review_payload)
+            _render_review_payload(api, app_id, review_payload)
             _render_browser_assist_controls(api, app_id)
 
 
@@ -182,7 +204,11 @@ def _render_event_history(raw_events: object) -> None:
         st.write(f"- {created_at} | {event_type}{suffix}")
 
 
-def _render_review_payload(payload: dict[str, object]) -> None:
+def _render_review_payload(
+    api: ApiClient,
+    app_id: int,
+    payload: dict[str, object],
+) -> None:
     st.write("Review")
     st.write(f"Review status: {payload.get('status') or '-'}")
     st.write(f"User approved: {payload.get('user_approved')}")
@@ -192,26 +218,81 @@ def _render_review_payload(payload: dict[str, object]) -> None:
     st.write(f"Match score: {match_score}")
     st.write(f"Selected resume: {payload.get('selected_resume_id') or '-'}")
     st.write("Cover letter")
-    st.text_area(
+    cover_letter = st.text_area(
         "Cover letter draft",
         value=str(payload.get("cover_letter") or ""),
         height=220,
         key=f"cover_letter_review_{payload.get('application_id')}",
     )
+    review_statuses = [status.value for status in QuestionStatus]
+    current_cover_letter_status = str(payload.get("cover_letter_status") or "DRAFT")
+    cover_letter_status = st.selectbox(
+        "Cover letter review status",
+        options=review_statuses,
+        index=(
+            review_statuses.index(current_cover_letter_status)
+            if current_cover_letter_status in review_statuses
+            else 0
+        ),
+        key=f"cover_letter_status_{app_id}",
+    )
 
     st.write("Screening answers")
     answers = payload.get("screening_answers")
+    edited_answers: list[dict[str, object]] = []
     if isinstance(answers, list) and answers:
-        for answer in answers:
+        for index, answer in enumerate(answers):
             if not isinstance(answer, dict):
                 continue
-            st.write(
-                f"- {answer.get('question')} => "
-                f"{answer.get('answer') or '[NEEDS_USER_INPUT]'} "
-                f"({answer.get('status')})"
+            question_id = answer.get("id")
+            if not isinstance(question_id, int):
+                continue
+            st.write(str(answer.get("question") or "Question"))
+            answer_text = st.text_area(
+                f"Answer {index + 1}",
+                value=str(answer.get("answer") or ""),
+                height=100,
+                key=f"app_answer_{app_id}_{question_id}",
+            )
+            current_answer_status = str(
+                answer.get("status") or QuestionStatus.DRAFT.value
+            )
+            answer_status = st.selectbox(
+                f"Answer status {index + 1}",
+                options=review_statuses,
+                index=(
+                    review_statuses.index(current_answer_status)
+                    if current_answer_status in review_statuses
+                    else 0
+                ),
+                key=f"app_answer_status_{app_id}_{question_id}",
+            )
+            edited_answers.append(
+                {
+                    "id": question_id,
+                    "answer": answer_text,
+                    "status": answer_status,
+                }
             )
     else:
         st.write("- None")
+
+    if st.button("Save Review", key=f"app_review_save_{app_id}"):
+        try:
+            response = api.patch(
+                f"/api/v1/applications/{app_id}/review",
+                {
+                    "cover_letter": cover_letter,
+                    "cover_letter_status": cover_letter_status,
+                    "screening_answers": edited_answers,
+                },
+            )
+            updated_payload = response.data if isinstance(response.data, dict) else {}
+            st.session_state[f"review_payload_{app_id}"] = updated_payload
+            st.success("Review changes saved.")
+            st.rerun()
+        except ApiClientError as exc:
+            st.error(str(exc))
 
     fields = payload.get("fields_to_submit")
     st.write("Fields to be submitted")
