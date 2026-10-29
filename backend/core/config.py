@@ -8,6 +8,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_URL = f"sqlite:///{(PROJECT_ROOT / 'data' / 'jobpilot.db').as_posix()}"
 DEFAULT_RESUME_STORAGE_DIR = str(PROJECT_ROOT / "data" / "resumes")
 
+# Keep local development independent from Docker-only /data mounts.
+# The application should prefer the project-local data directory unless an explicit
+# environment override is provided.
+
 
 class Settings(BaseSettings):
     app_name: str = Field(default="JobPilot", alias="APP_NAME")
@@ -36,6 +40,14 @@ class Settings(BaseSettings):
     browser_headless: bool = Field(
         default=True,
         alias="BROWSER_HEADLESS",
+    )
+    browser_auto_submit_enabled: bool = Field(
+        default=False,
+        alias="BROWSER_AUTO_SUBMIT_ENABLED",
+    )
+    browser_restricted_hosts: str | list[str] = Field(
+        default="linkedin.com,naukri.com",
+        alias="BROWSER_RESTRICTED_HOSTS",
     )
     search_provider: str | None = Field(default=None, alias="SEARCH_PROVIDER")
     search_api_key: str | None = Field(default=None, alias="SEARCH_API_KEY")
@@ -89,6 +101,28 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return str(path)
         return str((PROJECT_ROOT / path).resolve())
+
+    @field_validator("browser_restricted_hosts", mode="before")
+    @classmethod
+    def _parse_browser_restricted_hosts(cls, value: object) -> list[str]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                raw = stripped.strip("[]")
+                if not raw:
+                    return []
+                parsed = [item.strip().strip("\"'") for item in raw.split(",")]
+                return [item.lower() for item in parsed if item]
+            return [
+                item.strip().lower()
+                for item in stripped.split(",")
+                if item.strip()
+            ]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        return [str(value).strip().lower()]
 
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),

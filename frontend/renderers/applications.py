@@ -8,6 +8,69 @@ from backend.database.models import ApplicationStatus, QuestionStatus
 from frontend.api_client import ApiClient, ApiClientError
 
 
+def _build_apply_queue_rows(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    queue_rows: list[dict[str, object]] = []
+    actionable_statuses = {
+        "READY_FOR_REVIEW",
+        "SHORTLISTED",
+        "DISCOVERED",
+        "PREPARING",
+    }
+    status_priority = {
+        "READY_FOR_REVIEW": 0,
+        "SHORTLISTED": 1,
+        "DISCOVERED": 2,
+        "PREPARING": 3,
+    }
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        app_id = item.get("id")
+        if not isinstance(app_id, int):
+            continue
+        status = str(item.get("status") or "DISCOVERED")
+        if status not in actionable_statuses:
+            continue
+
+        match_score = item.get("match_score")
+        try:
+            score = int(match_score) if match_score is not None else 0
+        except (TypeError, ValueError):
+            score = 0
+        if status == "READY_FOR_REVIEW":
+            next_action = "Review + browser assist"
+        elif status == "PREPARING":
+            next_action = "Prepare + queue"
+        elif status in {"DISCOVERED", "SHORTLISTED"}:
+            next_action = "Review fit + prepare"
+        else:
+            next_action = "Review status"
+
+        queue_rows.append(
+            {
+                "id": app_id,
+                "job_title": str(item.get("job_title") or "Unassigned role"),
+                "company": str(item.get("company") or "Unknown company"),
+                "status": status,
+                "match_score": score,
+                "next_action": next_action,
+                "_priority": status_priority.get(status, 99),
+            }
+        )
+
+    queue_rows.sort(
+        key=lambda row: (
+            int(row["_priority"]),
+            -int(row["match_score"]),
+            str(row["job_title"]).lower(),
+        )
+    )
+    for row in queue_rows:
+        row.pop("_priority", None)
+    return queue_rows
+
+
 def render_applications(api: ApiClient) -> None:
     st.header("Applications")
 
@@ -43,6 +106,23 @@ def render_applications(api: ApiClient) -> None:
     if not items:
         st.info("No applications found yet.")
         return
+
+    queue_rows = _build_apply_queue_rows(items)
+    if queue_rows:
+        st.subheader("Automation Queue")
+        queue_frame = __import__("pandas").DataFrame(
+            [
+                {
+                    "Role": row["job_title"],
+                    "Company": row["company"],
+                    "Status": row["status"],
+                    "Fit %": row["match_score"],
+                    "Next action": row["next_action"],
+                }
+                for row in queue_rows
+            ]
+        )
+        st.dataframe(queue_frame, hide_index=True, use_container_width=True)
 
     st.subheader("Application Tracker")
     for item in items:
@@ -114,7 +194,7 @@ def _render_tracker_item(api: ApiClient, item: dict[str, object]) -> None:
 
         _render_event_history(item.get("events"))
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             _render_status_update(api, app_id, status)
         with col2:
@@ -139,6 +219,30 @@ def _render_tracker_item(api: ApiClient, item: dict[str, object]) -> None:
                 except ApiClientError as exc:
                     st.error(str(exc))
         with col3:
+            if status == "READY_FOR_REVIEW":
+                if st.button("Run AI apply", key=f"app_execute_{app_id}"):
+                    try:
+                        response = api.post(
+                            f"/api/v1/applications/{app_id}/execute",
+                            {
+                                "application_url": str(
+                                    item.get("application_url")
+                                    or item.get("job_url")
+                                    or ""
+                                ).strip(),
+                                "detect_fields": True,
+                                "dry_run": True,
+                            },
+                        )
+                        payload = response.data if isinstance(response.data, dict) else {}
+                        st.success(
+                            f"Automation result: {payload.get('mode') or 'BROWSER_ASSISTED'}"
+                        )
+                        st.caption(str(payload.get("message") or "Automation started."))
+                        st.rerun()
+                    except ApiClientError as exc:
+                        st.error(str(exc))
+        with col4:
             if st.button("Refresh Review", key=f"app_review_{app_id}"):
                 try:
                     response = api.get(f"/api/v1/applications/{app_id}/review")

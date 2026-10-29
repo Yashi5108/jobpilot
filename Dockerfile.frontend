@@ -3,7 +3,8 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -14,4 +15,4 @@ RUN python -m pip install --upgrade pip \
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "/app/frontend/1_dashboard.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+CMD ["streamlit", "run", "/app/frontend/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]

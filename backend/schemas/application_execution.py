@@ -7,7 +7,13 @@ from pydantic import BaseModel, Field
 from backend.schemas.browser_assistant import BrowserFieldInput
 
 ExecutionMode = Literal["AUTHORIZED_API", "BROWSER_ASSISTED", "OPEN_AND_APPLY"]
-ExecutionStatus = Literal["READY", "SUBMITTED", "OPEN_AND_APPLY", "BLOCKED"]
+ExecutionStatus = Literal[
+    "READY",
+    "SUBMITTED",
+    "OPEN_AND_APPLY",
+    "BLOCKED",
+    "LOGIN_REQUIRED",
+]
 FieldExecutionStatus = Literal[
     "FILLED",
     "SKIPPED",

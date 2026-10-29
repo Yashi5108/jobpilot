@@ -2,6 +2,41 @@
 
 AI Job Search & Application Assistant
 
+## Quick Start
+
+Fastest way to run JobPilot locally:
+
+```bash
+cd /path/to/jobpilot
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[dev]"
+cp .env.example .env
+.venv/bin/alembic upgrade head
+/absolute/path/to/jobpilot/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --app-dir /absolute/path/to/jobpilot &
+/absolute/path/to/jobpilot/.venv/bin/streamlit run /absolute/path/to/jobpilot/frontend/app.py --server.headless true --server.port 8501
+```
+
+Then open:
+
+- Frontend: http://localhost:8501
+- Backend: http://localhost:8000/health
+
+> Keep `BROWSER_AUTO_SUBMIT_ENABLED=false` unless you explicitly want a reviewed/manual browser flow.
+
+### One-Command Docker Start
+
+```bash
+cd /path/to/jobpilot
+docker compose up --build
+```
+
+Then open:
+
+- Frontend: http://localhost:8501
+- Backend: http://localhost:8000/health
+
 ## Overview
 
 JobPilot is a local-first application that helps you:
@@ -57,31 +92,70 @@ jobpilot/
 
 ## Setup
 
-1. Create and activate virtual environment:
+### Step 1: Create the Python environment
 
 ```bash
+cd /path/to/jobpilot
 python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-2. Install dependencies:
+### Step 2: Install project dependencies
 
 ```bash
 pip install --upgrade pip
 pip install -e ".[dev]"
 ```
 
-3. Copy environment file:
+### Step 3: Configure environment values
 
 ```bash
 cp .env.example .env
 ```
 
-4. Run migrations:
+Then edit the local `.env` file and set values such as:
+
+- `DATABASE_URL`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL`
+- `BROWSER_ASSISTANT_MODE`
+- `BROWSER_AUTO_SUBMIT_ENABLED` (keep `false` by default for safety)
+- `BROWSER_RESTRICTED_HOSTS`
+
+### Step 4: Apply DB schema
 
 ```bash
 .venv/bin/alembic upgrade head
 ```
+
+### Step 5: Start backend
+
+Use an absolute path to avoid working-directory issues:
+
+```bash
+/absolute/path/to/jobpilot/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --app-dir /absolute/path/to/jobpilot
+```
+
+Health checks:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/api/v1/health
+```
+
+### Step 6: Start frontend
+
+```bash
+/absolute/path/to/jobpilot/.venv/bin/streamlit run /absolute/path/to/jobpilot/frontend/app.py --server.headless true --server.port 8501
+```
+
+### Step 7: Optional local Ollama
+
+```bash
+ollama pull llama3.1
+```
+
+The app can operate without Ollama for deterministic matching, but AI analysis and drafting will be limited until Ollama is available.
 
 ## Configuration
 
@@ -116,6 +190,16 @@ curl http://127.0.0.1:8000/api/v1/health
 ```bash
 /absolute/path/to/jobpilot/.venv/bin/streamlit run /absolute/path/to/jobpilot/frontend/app.py --server.headless true --server.port 8501
 ```
+
+## Safe Browser Automation
+
+The default browser automation profile is intentionally conservative:
+
+- `BROWSER_AUTO_SUBMIT_ENABLED=false`
+- `BROWSER_RESTRICTED_HOSTS=linkedin.com,naukri.com`
+- provider-specific automation remains gated behind explicit review and approval
+
+This prevents accidental auto-application on protected or sensitive hosts while still allowing safe form-filling flows.
 
 ## Ollama Usage
 

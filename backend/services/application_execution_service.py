@@ -7,6 +7,10 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
+from backend.automation.provider_adapters import (
+    BaseProviderAdapter,
+    get_provider_adapters,
+)
 from backend.browser.assistant import (
     BrowserAssistantServiceError,
     discover_browser_fields,
@@ -45,10 +49,7 @@ class AuthorizedApplicationAdapter(Protocol):
         *,
         application: Application,
         application_url: str | None,
-    ) -> AuthorizedExecutionResult: ...
-
-
-_RESTRICTED_BROWSER_HOSTS = ("linkedin.com", "naukri.com")
+    ) -> AuthorizedExecutionResult | BaseProviderAdapter: ...
 
 
 def execute_application(
@@ -87,24 +88,30 @@ def execute_application(
             submit=payload.submit,
         )
 
-    if _is_restricted_browser_host(application_url):
-        response = ApplicationExecutionResponse(
-            application_id=application.id,
-            mode="OPEN_AND_APPLY",
-            status="OPEN_AND_APPLY",
-            submitted=False,
-            requires_human_submit=True,
-            application_url=application_url,
-            field_results=[],
-            message=(
-                "This site is not automated by JobPilot. Open the legitimate "
-                "application page and apply manually."
-            ),
-        )
-        _record_execution(db, application.id, response.message)
-        return response
-
     settings = get_settings()
+    if _is_restricted_browser_host(application_url):
+        if payload.submit and settings.browser_auto_submit_enabled:
+            message = (
+                "Browser automation is enabled for this host; continuing with "
+                "safe browser automation."
+            )
+        else:
+            response = ApplicationExecutionResponse(
+                application_id=application.id,
+                mode="OPEN_AND_APPLY",
+                status="OPEN_AND_APPLY",
+                submitted=False,
+                requires_human_submit=True,
+                application_url=application_url,
+                field_results=[],
+                message=(
+                    "This site is not automated by JobPilot. Open the legitimate "
+                    "application page and apply manually."
+                ),
+            )
+            _record_execution(db, application.id, response.message)
+            return response
+
     fields = [
         BrowserField(
             name=item.name,
@@ -144,6 +151,7 @@ def execute_application(
             application_url=application_url,
             fields=fields,
             dry_run=payload.dry_run,
+            auto_submit=bool(payload.submit and settings.browser_auto_submit_enabled),
         )
     except BrowserAssistantServiceError as exc:
         raise ApplicationExecutionServiceError(
@@ -178,6 +186,22 @@ def _execute_authorized_application(
     submit: bool,
 ) -> ApplicationExecutionResponse:
     if not submit:
+        if getattr(adapter, "name", "").lower() == "linkedin":
+            message = (
+                "LinkedIn requires an explicit login session before safe form orchestration. "
+                "JobPilot will open the page and guide the user through a manual review; "
+                "there is no auto-submit by default."
+            )
+            return ApplicationExecutionResponse(
+                application_id=application.id,
+                mode="AUTHORIZED_API",
+                status="LOGIN_REQUIRED",
+                submitted=False,
+                requires_human_submit=True,
+                application_url=application_url,
+                field_results=[],
+                message=message,
+            )
         return ApplicationExecutionResponse(
             application_id=application.id,
             mode="AUTHORIZED_API",
@@ -208,10 +232,11 @@ def _execute_authorized_application(
         db.refresh(application)
 
     _record_execution(db, application.id, result.message)
+    result_status = result.status if not result.success else "SUBMITTED"
     return ApplicationExecutionResponse(
         application_id=application.id,
         mode="AUTHORIZED_API",
-        status=("SUBMITTED" if result.success else "BLOCKED"),
+        status=result_status,
         submitted=result.success,
         requires_human_submit=not result.success,
         application_url=application_url,
@@ -221,14 +246,15 @@ def _execute_authorized_application(
 
 
 def _authorized_adapters() -> list[AuthorizedApplicationAdapter]:
-    return []
+    return get_provider_adapters()
 
 
 def _select_authorized_adapter(
     application: Application,
 ) -> AuthorizedApplicationAdapter | None:
     for adapter in _authorized_adapters():
-        if adapter.supports(application):
+        enabled = getattr(adapter, "enabled", True)
+        if enabled and adapter.supports(application):
             return adapter
     return None
 
@@ -237,7 +263,11 @@ def _is_restricted_browser_host(application_url: str | None) -> bool:
     if not application_url:
         return False
     hostname = urlsplit(application_url).netloc.lower()
-    return any(host in hostname for host in _RESTRICTED_BROWSER_HOSTS)
+    settings = get_settings()
+    restricted_hosts = getattr(settings, "browser_restricted_hosts", [])
+    if not restricted_hosts:
+        return False
+    return any(host in hostname for host in restricted_hosts)
 
 
 def _record_execution(db: Session, application_id: int, description: str) -> None:

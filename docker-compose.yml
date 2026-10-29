@@ -9,6 +9,10 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////data/jobpilot/jobpilot.db}
       RESUME_STORAGE_DIR: ${RESUME_STORAGE_DIR:-/data/jobpilot/resumes}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      BROWSER_ASSISTANT_MODE: ${BROWSER_ASSISTANT_MODE:-playwright}
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
+      BROWSER_AUTO_SUBMIT_ENABLED: ${BROWSER_AUTO_SUBMIT_ENABLED:-false}
+      BROWSER_RESTRICTED_HOSTS: ${BROWSER_RESTRICTED_HOSTS:-linkedin.com,naukri.com}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -16,6 +20,7 @@ services:
       - ./backend:/app/backend
       - ./alembic:/app/alembic
       - ./tests:/app/tests
+      - ./data:/app/data
     ports:
       - "8000:8000"
     healthcheck:
@@ -38,8 +43,11 @@ services:
       - ${JOBPILOT_ENV_FILE:-.env}
     environment:
       JOBPILOT_API_BASE_URL: http://backend:8000
+      DATABASE_URL: sqlite:///./data/jobpilot.db
+      RESUME_STORAGE_DIR: ./data/resumes
     volumes:
       - ./frontend:/app/frontend
+      - ./data:/app/data
     ports:
       - "8501:8501"
     healthcheck:

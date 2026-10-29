@@ -30,7 +30,13 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
     db_file = Path(database_path)
     if not db_file.is_absolute():
         db_file = Path.cwd() / db_file
-    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Some environments expose a read-only /data root. Fall back safely and keep
+        # the app usable with the project-local database path already configured.
+        return
 
 
 def _build_engine() -> Engine:

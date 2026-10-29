@@ -56,6 +56,7 @@ def run_browser_assistant_detailed(
     application_url: str,
     fields: list[BrowserField],
     dry_run: bool,
+    auto_submit: bool = False,
 ) -> tuple[list[dict[str, str]], str]:
     application = db.get(Application, application_id)
     if application is None:
@@ -120,6 +121,7 @@ def run_browser_assistant_detailed(
             application_url=application_url,
             fields=field_results,
             headless=settings.browser_headless,
+            auto_submit=auto_submit,
         )
         details["field_results"] = field_results
         application.preparation_details = details
@@ -204,6 +206,7 @@ def _run_playwright_fill(
     application_url: str,
     fields: list[dict[str, str]],
     headless: bool,
+    auto_submit: bool = False,
 ) -> tuple[list[dict[str, str]], str]:
     try:
         from playwright.sync_api import sync_playwright
@@ -245,8 +248,29 @@ def _run_playwright_fill(
                 field["status"] = "FAILED"
                 field["message"] = "Failed to fill field safely."
 
+        if auto_submit:
+            for submit_selector in [
+                "button[type='submit']",
+                "input[type='submit']",
+                "button:has-text('Submit')",
+                "button:has-text('Apply')",
+                "input[value*='Submit']",
+                "input[value*='Apply']",
+            ]:
+                try:
+                    submit_button = page.locator(submit_selector).first
+                    if submit_button.count() > 0:
+                        submit_button.click()
+                        break
+                except Exception:
+                    continue
+
         browser.close()
 
+    if auto_submit:
+        return fields, (
+            "Form fields were filled and submit was triggered automatically."
+        )
     return fields, (
         "Form fields were filled where safely mapped. "
         "Manual review and submission required."
